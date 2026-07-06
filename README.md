@@ -1,5 +1,7 @@
 # opskit
 
+[![CI](https://github.com/0xDiyor/opskit/actions/workflows/ci.yml/badge.svg)](https://github.com/0xDiyor/opskit/actions/workflows/ci.yml)
+
 Terminal based IT diagnostics toolkit for Windows. Network, ports, health, and cert checks plus vetted script execution, with a modular design built to grow. Zero dependencies, PowerShell 5.1 compatible.
 
 <!-- Add a terminal screenshot here once the menu renders: docs/screenshots/menu.png -->
@@ -60,9 +62,23 @@ If you run this tool in a managed environment, get approval from whoever owns th
 - [ ] v0.4: folder scoped script runner with hash verified manifest
 - [ ] v0.5: non-interactive mode (run a module straight from the command line)
 
+## CI
+
+Every push and pull request runs through GitHub Actions on a `windows-latest` runner ([ci.yml](.github/workflows/ci.yml)):
+
+- **Lint**: PSScriptAnalyzer over the whole repo, failing on any warning or error. Rule config lives in [PSScriptAnalyzerSettings.psd1](PSScriptAnalyzerSettings.psd1) (only `PSAvoidUsingWriteHost` is excluded - colored host output is the point of a TUI).
+- **Smoke test**: [tests/smoke.ps1](tests/smoke.ps1) drives every implemented module end to end through the real menu under Windows PowerShell 5.1 (the compatibility floor), by feeding menu choices via stdin and asserting on each module's output. This exercises the Windows-only paths - `Get-NetTCPConnection`, `Get-CimInstance`, `Resolve-DnsName`, the `Cert:` drive - on every change.
+
+To support running headless in CI, the script guards its console calls: `Clear-Host` is skipped and `RawUI.ReadKey` falls back to `Read-Host` when the console handles are redirected. A side benefit is that opskit now behaves sanely when its output is piped to a file.
+
 ## Contributing
 
-Issues and PRs welcome. Code is linted with PSScriptAnalyzer; run it before submitting.
+Issues and PRs welcome. CI must pass: PSScriptAnalyzer with the repo settings file plus the smoke test (see above). To check locally before pushing:
+
+```powershell
+Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
+.\tests\smoke.ps1
+```
 
 ## License
 
