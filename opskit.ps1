@@ -19,8 +19,16 @@ $Script:CertWarnDays = 30       # certs expiring within this many days get a war
 # ============================================================
 #  UI HELPERS
 # ============================================================
+function Clear-Screen {
+    # Clear-Host throws on 5.1 when output is redirected (no console buffer),
+    # e.g. under CI or when piping output to a file.
+    if (-not [Console]::IsOutputRedirected) {
+        Clear-Host
+    }
+}
+
 function Show-Banner {
-    Clear-Host
+    Clear-Screen
     # ASCII-only banner: avoids Unicode codepage issues in conhost.
     $banner = @"
   ___  ____  ____  _  _  ____  ____
@@ -46,7 +54,7 @@ function Show-SubHeader {
     # screen like Show-Banner does, but skips the ASCII art so it isn't
     # redrawn on every sub-menu round-trip.
     param([string]$Title)
-    Clear-Host
+    Clear-Screen
     Write-Host " opskit v$($Script:Version)" -ForegroundColor DarkGray
     Write-SectionHeader $Title
 }
@@ -54,6 +62,14 @@ function Show-SubHeader {
 function Wait-ForKey {
     Write-Host ""
     Write-Host " Press any key to return to menu..." -ForegroundColor DarkGray
+
+    # With redirected stdin (CI, piped input) RawUI.ReadKey can hang or fail;
+    # read a line from the input stream instead of waiting on the console.
+    if ([Console]::IsInputRedirected) {
+        $null = Read-Host
+        return
+    }
+
     try {
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     }
@@ -364,6 +380,11 @@ function Invoke-HealthSnapshot {
 #  MODULE: CERTIFICATE CHECKER
 # ============================================================
 function Invoke-RemoteCertCheck {
+    # Suppression covers the SSL validation callback below: its first three
+    # parameters are required by the delegate signature but intentionally unused.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '')]
+    param()
+
     Show-SubHeader "Remote Certificate Check"
 
     $target = Read-Host " Enter hostname (and optional :port, default 443)"
@@ -396,7 +417,7 @@ function Invoke-RemoteCertCheck {
         # Accept any server cert here (self-signed, expired, etc.) - the point is to inspect
         # it, not to enforce trust. The actual chain result is captured for display below.
         $validationCallback = {
-            param($sender, $certificate, $chain, $sslPolicyErrors)
+            param($callbackSender, $callbackCert, $callbackChain, $sslPolicyErrors)
             $script:CertPolicyErrors = $sslPolicyErrors
             return $true
         }
