@@ -88,16 +88,193 @@ function Invoke-PortsInUse {
 }
 
 # ============================================================
-#  MODULE STUBS  (same shape as Invoke-PortsInUse - fill these in)
+#  MODULE: NETWORK TOOLKIT
 # ============================================================
-function Invoke-NetToolkit {
+function ConvertTo-Ipv4String {
+    param([Parameter(Mandatory)][uint32]$Value)
+    $bytes = [byte[]]@(
+        [byte](($Value -shr 24) -band 0xFF),
+        [byte](($Value -shr 16) -band 0xFF),
+        [byte](($Value -shr 8) -band 0xFF),
+        [byte]($Value -band 0xFF)
+    )
+    return ([System.Net.IPAddress]::new($bytes)).ToString()
+}
+
+function Invoke-SubnetCalc {
     Show-Banner
-    Write-SectionHeader "Network Toolkit"
-    # TODO: submenu -> subnet calc | DNS lookup (Resolve-DnsName) | slow-path diag (Test-NetConnection -TraceRoute)
-    Write-Host " Not implemented yet." -ForegroundColor Yellow
+    Write-SectionHeader "Subnet / CIDR Calculator"
+
+    $cidr = Read-Host " Enter IP/CIDR (e.g. 192.168.1.10/24)"
+
+    if ($cidr -notmatch '^(?<ip>\d{1,3}(\.\d{1,3}){3})/(?<prefix>\d{1,2})$') {
+        Write-Host " Invalid format. Expected IP/CIDR, e.g. 10.0.0.5/24" -ForegroundColor Red
+        Wait-ForKey
+        return
+    }
+
+    $prefix = [int]$Matches['prefix']
+    if ($prefix -lt 0 -or $prefix -gt 32) {
+        Write-Host " Prefix must be between 0 and 32." -ForegroundColor Red
+        Wait-ForKey
+        return
+    }
+
+    $ip = $null
+    if (-not [System.Net.IPAddress]::TryParse($Matches['ip'], [ref]$ip) -or
+        $ip.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        Write-Host " Invalid IPv4 address." -ForegroundColor Red
+        Wait-ForKey
+        return
+    }
+
+    $ipBytes = $ip.GetAddressBytes()
+    $ipValue = ([uint32]$ipBytes[0] -shl 24) -bor ([uint32]$ipBytes[1] -shl 16) -bor ([uint32]$ipBytes[2] -shl 8) -bor [uint32]$ipBytes[3]
+
+    $maskValue = if ($prefix -eq 0) { [uint32]0 } else { [uint32]([uint32]::MaxValue -shl (32 - $prefix)) }
+    $wildcardValue = (-bnot $maskValue) -band [uint32]::MaxValue
+    $networkValue = $ipValue -band $maskValue
+    $broadcastValue = $networkValue -bor $wildcardValue
+
+    $totalHosts = [math]::Pow(2, 32 - $prefix)
+    switch ($prefix) {
+        32 {
+            $usableHosts = 1
+            $firstUsable = ConvertTo-Ipv4String $networkValue
+            $lastUsable  = ConvertTo-Ipv4String $networkValue
+        }
+        31 {
+            $usableHosts = 2
+            $firstUsable = ConvertTo-Ipv4String $networkValue
+            $lastUsable  = ConvertTo-Ipv4String $broadcastValue
+        }
+        default {
+            $usableHosts = $totalHosts - 2
+            $firstUsable = ConvertTo-Ipv4String ($networkValue + 1)
+            $lastUsable  = ConvertTo-Ipv4String ($broadcastValue - 1)
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  Network address   : $(ConvertTo-Ipv4String $networkValue)"
+    Write-Host "  Broadcast address : $(ConvertTo-Ipv4String $broadcastValue)"
+    Write-Host "  Subnet mask       : $(ConvertTo-Ipv4String $maskValue)  (/$prefix)"
+    Write-Host "  Wildcard mask     : $(ConvertTo-Ipv4String $wildcardValue)"
+    Write-Host "  Usable host range : $firstUsable - $lastUsable"
+    Write-Host "  Total addresses   : $totalHosts"
+    Write-Host "  Usable hosts      : $usableHosts"
+
     Wait-ForKey
 }
 
+function Invoke-DnsLookup {
+    Show-Banner
+    Write-SectionHeader "DNS Lookup"
+
+    $target = Read-Host " Enter hostname or IP to resolve"
+    if ([string]::IsNullOrWhiteSpace($target)) {
+        Write-Host " Nothing entered." -ForegroundColor Red
+        Wait-ForKey
+        return
+    }
+
+    try {
+        # Resolve-DnsName ships with the DnsClient module (Win8/Server 2012+, same floor as Get-NetTCPConnection).
+        $results = Resolve-DnsName -Name $target -ErrorAction Stop |
+            Select-Object Name, Type, TTL, @{
+                Name       = 'Data'
+                Expression = {
+                    if ($_.PSObject.Properties['IPAddress']) { $_.IPAddress }
+                    elseif ($_.PSObject.Properties['NameHost']) { $_.NameHost }
+                    elseif ($_.PSObject.Properties['Strings']) { $_.Strings -join ' ' }
+                    else { '' }
+                }
+            }
+
+        $results | Format-Table -AutoSize | Out-String | Write-Host
+        Write-Host " $(@($results).Count) record(s) found." -ForegroundColor $Script:Accent
+    }
+    catch {
+        Write-Host " ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    Wait-ForKey
+}
+
+function Invoke-TraceDiag {
+    Show-Banner
+    Write-SectionHeader "Latency / Traceroute"
+
+    $target = Read-Host " Enter hostname or IP to test"
+    if ([string]::IsNullOrWhiteSpace($target)) {
+        Write-Host " Nothing entered." -ForegroundColor Red
+        Wait-ForKey
+        return
+    }
+
+    Write-Host " Testing connectivity and tracing route to $target (this can take a moment)..." -ForegroundColor DarkGray
+    Write-Host ""
+
+    try {
+        $result = Test-NetConnection -ComputerName $target -TraceRoute -ErrorAction Stop
+
+        Write-Host "  Remote address  : $($result.RemoteAddress)"
+        Write-Host "  Ping succeeded   : $($result.PingSucceeded)"
+        if ($result.PSObject.Properties['PingReplyDetails'] -and $result.PingReplyDetails) {
+            Write-Host "  Round-trip time  : $($result.PingReplyDetails.RoundtripTime) ms"
+        }
+
+        Write-Host ""
+        Write-Host " Trace route hops:" -ForegroundColor $Script:Accent
+        $hop = 0
+        foreach ($hopAddress in $result.TraceRoute) {
+            $hop++
+            Write-Host "  $hop`: $hopAddress"
+        }
+    }
+    catch {
+        Write-Host " ERROR: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host " (Target may be unreachable, or blocking ICMP.)" -ForegroundColor DarkGray
+    }
+
+    Wait-ForKey
+}
+
+function Invoke-NetToolkit {
+    # Sub-menu follows the same hashtable dispatch pattern as the main menu.
+    $NetDispatch = @{
+        "1" = { Invoke-SubnetCalc }
+        "2" = { Invoke-DnsLookup }
+        "3" = { Invoke-TraceDiag }
+    }
+
+    while ($true) {
+        Show-Banner
+        Write-SectionHeader "Network Toolkit"
+        Write-Host "  [1] Subnet / CIDR calculator"
+        Write-Host "  [2] DNS lookup"
+        Write-Host "  [3] Latency / traceroute"
+        Write-Host "  [B] Back to main menu"
+        Write-Host ""
+
+        $netChoice = (Read-Host " Select an option").Trim().ToUpper()
+
+        if ($netChoice -eq "B") {
+            return
+        }
+        elseif ($NetDispatch.ContainsKey($netChoice)) {
+            & $NetDispatch[$netChoice]
+        }
+        else {
+            Write-Host " Invalid option." -ForegroundColor Red
+            Start-Sleep -Milliseconds 800
+        }
+    }
+}
+
+# ============================================================
+#  MODULE STUBS  (same shape as Invoke-PortsInUse - fill these in)
+# ============================================================
 function Invoke-HealthSnapshot {
     Show-Banner
     Write-SectionHeader "System Health Snapshot"
