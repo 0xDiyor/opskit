@@ -353,15 +353,149 @@ function Invoke-HealthSnapshot {
 }
 
 # ============================================================
-#  MODULE STUBS  (same shape as Invoke-PortsInUse - fill these in)
+#  MODULE: CERTIFICATE CHECKER
 # ============================================================
-function Invoke-CertChecker {
+function Invoke-RemoteCertCheck {
     Show-Banner
-    Write-SectionHeader "Certificate Checker"
-    # TODO: [Net.Sockets.TcpClient] + SslStream to pull remote cert, check NotAfter vs warn threshold.
-    #       Local store: Get-ChildItem Cert:\LocalMachine\My
-    Write-Host " Not implemented yet." -ForegroundColor Yellow
+    Write-SectionHeader "Remote Certificate Check"
+
+    $target = Read-Host " Enter hostname (and optional :port, default 443)"
+    if ([string]::IsNullOrWhiteSpace($target)) {
+        Write-Host " Nothing entered." -ForegroundColor Red
+        Wait-ForKey
+        return
+    }
+
+    $hostName, $portText = $target -split ':', 2
+    $port = 443
+    if ($portText -and -not [int]::TryParse($portText, [ref]$port)) {
+        Write-Host " Invalid port." -ForegroundColor Red
+        Wait-ForKey
+        return
+    }
+
+    $warnDays = 30
+    $tcpClient = $null
+    $sslStream = $null
+    $script:CertPolicyErrors = [System.Net.Security.SslPolicyErrors]::None
+
+    try {
+        $tcpClient = New-Object System.Net.Sockets.TcpClient
+        $connectTask = $tcpClient.ConnectAsync($hostName, $port)
+        if (-not $connectTask.Wait(5000)) {
+            throw "Connection to $hostName`:$port timed out."
+        }
+
+        # Accept any server cert here (self-signed, expired, etc.) - the point is to inspect
+        # it, not to enforce trust. The actual chain result is captured for display below.
+        $validationCallback = {
+            param($sender, $certificate, $chain, $sslPolicyErrors)
+            $script:CertPolicyErrors = $sslPolicyErrors
+            return $true
+        }
+
+        $sslStream = New-Object System.Net.Security.SslStream($tcpClient.GetStream(), $false, $validationCallback)
+        $sslStream.AuthenticateAsClient($hostName)
+
+        $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($sslStream.RemoteCertificate)
+        $daysLeft = ($cert.NotAfter - (Get-Date)).Days
+
+        Write-Host ""
+        Write-Host "  Subject      : $($cert.Subject)"
+        Write-Host "  Issuer       : $($cert.Issuer)"
+        Write-Host "  Valid from   : $($cert.NotBefore)"
+        Write-Host "  Valid to     : $($cert.NotAfter)"
+        Write-Host "  Thumbprint   : $($cert.Thumbprint)"
+        Write-Host "  Chain status : $($script:CertPolicyErrors)"
+
+        if ($daysLeft -lt 0) {
+            Write-Host "  EXPIRED $([math]::Abs($daysLeft)) day(s) ago." -ForegroundColor Red
+        }
+        elseif ($daysLeft -le $warnDays) {
+            Write-Host "  WARNING: expires in $daysLeft day(s)." -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "  OK: expires in $daysLeft day(s)." -ForegroundColor $Script:Accent
+        }
+    }
+    catch {
+        $msg = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
+        Write-Host " ERROR: $msg" -ForegroundColor Red
+    }
+    finally {
+        if ($sslStream) { $sslStream.Dispose() }
+        if ($tcpClient) { $tcpClient.Dispose() }
+    }
+
     Wait-ForKey
+}
+
+function Invoke-LocalCertCheck {
+    Show-Banner
+    Write-SectionHeader "Local Certificate Store"
+
+    $warnDays = 30
+
+    try {
+        $certs = Get-ChildItem -Path Cert:\LocalMachine\My, Cert:\CurrentUser\My -ErrorAction Stop |
+            Sort-Object NotAfter |
+            Select-Object Subject, NotAfter, Thumbprint, @{
+                Name       = 'DaysLeft'
+                Expression = { ($_.NotAfter - (Get-Date)).Days }
+            }
+
+        if (-not $certs) {
+            Write-Host " No certificates found in LocalMachine\My or CurrentUser\My." -ForegroundColor Yellow
+            Wait-ForKey
+            return
+        }
+
+        foreach ($cert in $certs) {
+            $color = if ($cert.DaysLeft -lt 0) { "Red" } elseif ($cert.DaysLeft -le $warnDays) { "Yellow" } else { $Script:Accent }
+            Write-Host " $($cert.Subject)" -ForegroundColor $color
+            Write-Host "   Expires    : $($cert.NotAfter)  ($($cert.DaysLeft) day(s))"
+            Write-Host "   Thumbprint : $($cert.Thumbprint)"
+            Write-Host ""
+        }
+
+        $expiringCount = @($certs | Where-Object { $_.DaysLeft -le $warnDays }).Count
+        Write-Host " $(@($certs).Count) certificate(s) total, $expiringCount expiring within $warnDays days or already expired." -ForegroundColor $Script:Accent
+    }
+    catch {
+        Write-Host " ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    Wait-ForKey
+}
+
+function Invoke-CertChecker {
+    # Sub-menu follows the same hashtable dispatch pattern as the main menu.
+    $CertDispatch = @{
+        "1" = { Invoke-RemoteCertCheck }
+        "2" = { Invoke-LocalCertCheck }
+    }
+
+    while ($true) {
+        Show-Banner
+        Write-SectionHeader "Certificate Checker"
+        Write-Host "  [1] Remote certificate check (hostname:port)"
+        Write-Host "  [2] Local certificate store (LocalMachine / CurrentUser \My)"
+        Write-Host "  [B] Back to main menu"
+        Write-Host ""
+
+        $certChoice = (Read-Host " Select an option").Trim().ToUpper()
+
+        if ($certChoice -eq "B") {
+            return
+        }
+        elseif ($CertDispatch.ContainsKey($certChoice)) {
+            & $CertDispatch[$certChoice]
+        }
+        else {
+            Write-Host " Invalid option." -ForegroundColor Red
+            Start-Sleep -Milliseconds 800
+        }
+    }
 }
 
 # ============================================================
