@@ -273,17 +273,88 @@ function Invoke-NetToolkit {
 }
 
 # ============================================================
-#  MODULE STUBS  (same shape as Invoke-PortsInUse - fill these in)
+#  MODULE: HEALTH SNAPSHOT
 # ============================================================
 function Invoke-HealthSnapshot {
     Show-Banner
     Write-SectionHeader "System Health Snapshot"
-    # TODO: Get-CimInstance Win32_OperatingSystem / Win32_Processor / Win32_LogicalDisk
-    #       + uptime + top 5 processes by CPU/RAM. Add -Export flag for ticket notes.
-    Write-Host " Not implemented yet." -ForegroundColor Yellow
+
+    Write-Host " Gathering system health data..." -ForegroundColor DarkGray
+    Write-Host ""
+
+    try {
+        $os    = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $cpu   = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        $disks = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction Stop
+
+        $uptime = (Get-Date) - $os.LastBootUpTime
+        $uptimeText = "{0}d {1}h {2}m" -f $uptime.Days, $uptime.Hours, $uptime.Minutes
+
+        # TotalVisibleMemorySize/FreePhysicalMemory are in KB; dividing by 1MB (1,048,576) converts KB -> GB.
+        $totalMemGB = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2)
+        $freeMemGB  = [math]::Round($os.FreePhysicalMemory / 1MB, 2)
+        $usedMemGB  = [math]::Round($totalMemGB - $freeMemGB, 2)
+        $memPctUsed = if ($totalMemGB -gt 0) { [math]::Round(($usedMemGB / $totalMemGB) * 100, 1) } else { 0 }
+
+        $topCpu = Get-Process | Sort-Object CPU -Descending | Select-Object -First 5 -Property `
+            ProcessName, Id, CPU, @{Name = 'RAM(MB)'; Expression = { [math]::Round($_.WorkingSet64 / 1MB, 1) } }
+        $topRam = Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 5 -Property `
+            ProcessName, Id, @{Name = 'RAM(MB)'; Expression = { [math]::Round($_.WorkingSet64 / 1MB, 1) } }, CPU
+
+        $lines = New-Object System.Collections.Generic.List[string]
+        $lines.Add("opskit System Health Snapshot - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
+        $lines.Add("Host: $env:COMPUTERNAME")
+        $lines.Add("")
+        $lines.Add("-- OS --")
+        $lines.Add("Caption      : $($os.Caption)")
+        $lines.Add("Version      : $($os.Version)")
+        $lines.Add("Architecture : $($os.OSArchitecture)")
+        $lines.Add("Uptime       : $uptimeText (since $($os.LastBootUpTime))")
+        $lines.Add("")
+        $lines.Add("-- CPU --")
+        $lines.Add("Name          : $($cpu.Name)")
+        $lines.Add("Cores/Logical : $($cpu.NumberOfCores) / $($cpu.NumberOfLogicalProcessors)")
+        $lines.Add("Load          : $($cpu.LoadPercentage)%")
+        $lines.Add("")
+        $lines.Add("-- Memory --")
+        $lines.Add("Total : $totalMemGB GB")
+        $lines.Add("Used  : $usedMemGB GB ($memPctUsed%)")
+        $lines.Add("Free  : $freeMemGB GB")
+        $lines.Add("")
+        $lines.Add("-- Disks --")
+        foreach ($disk in $disks) {
+            $sizeGB  = [math]::Round($disk.Size / 1GB, 1)
+            $freeGB  = [math]::Round($disk.FreeSpace / 1GB, 1)
+            $usedPct = if ($disk.Size -gt 0) { [math]::Round((($disk.Size - $disk.FreeSpace) / $disk.Size) * 100, 1) } else { 0 }
+            $lines.Add("$($disk.DeviceID)  $freeGB GB free / $sizeGB GB total  ($usedPct% used)")
+        }
+        $lines.Add("")
+        $lines.Add("-- Top 5 processes by CPU time --")
+        $lines.AddRange([string[]]($topCpu | Format-Table -AutoSize | Out-String -Stream))
+        $lines.Add("-- Top 5 processes by RAM --")
+        $lines.AddRange([string[]]($topRam | Format-Table -AutoSize | Out-String -Stream))
+
+        foreach ($line in $lines) { Write-Host " $line" }
+
+        Write-Host ""
+        $export = (Read-Host " Export this snapshot to a text file for a ticket note? (y/N)").Trim().ToUpper()
+        if ($export -eq "Y") {
+            $fileName = "opskit-health-{0}.txt" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
+            $filePath = Join-Path -Path (Get-Location) -ChildPath $fileName
+            $lines | Out-File -FilePath $filePath -Encoding ascii
+            Write-Host " Saved to $filePath" -ForegroundColor $Script:Accent
+        }
+    }
+    catch {
+        Write-Host " ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    }
+
     Wait-ForKey
 }
 
+# ============================================================
+#  MODULE STUBS  (same shape as Invoke-PortsInUse - fill these in)
+# ============================================================
 function Invoke-CertChecker {
     Show-Banner
     Write-SectionHeader "Certificate Checker"
