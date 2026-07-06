@@ -39,6 +39,16 @@ function Write-SectionHeader {
     Write-Host ""
 }
 
+function Show-SubHeader {
+    # Lighter-weight header for screens nested under a sub-menu: clears the
+    # screen like Show-Banner does, but skips the ASCII art so it isn't
+    # redrawn on every sub-menu round-trip.
+    param([string]$Title)
+    Clear-Host
+    Write-Host " opskit v$($Script:Version)" -ForegroundColor DarkGray
+    Write-SectionHeader $Title
+}
+
 function Wait-ForKey {
     Write-Host ""
     Write-Host " Press any key to return to menu..." -ForegroundColor DarkGray
@@ -102,8 +112,7 @@ function ConvertTo-Ipv4String {
 }
 
 function Invoke-SubnetCalc {
-    Show-Banner
-    Write-SectionHeader "Subnet / CIDR Calculator"
+    Show-SubHeader "Subnet / CIDR Calculator"
 
     $cidr = Read-Host " Enter IP/CIDR (e.g. 192.168.1.10/24)"
 
@@ -168,8 +177,7 @@ function Invoke-SubnetCalc {
 }
 
 function Invoke-DnsLookup {
-    Show-Banner
-    Write-SectionHeader "DNS Lookup"
+    Show-SubHeader "DNS Lookup"
 
     $target = Read-Host " Enter hostname or IP to resolve"
     if ([string]::IsNullOrWhiteSpace($target)) {
@@ -202,8 +210,7 @@ function Invoke-DnsLookup {
 }
 
 function Invoke-TraceDiag {
-    Show-Banner
-    Write-SectionHeader "Latency / Traceroute"
+    Show-SubHeader "Latency / Traceroute"
 
     $target = Read-Host " Enter hostname or IP to test"
     if ([string]::IsNullOrWhiteSpace($target)) {
@@ -249,8 +256,7 @@ function Invoke-NetToolkit {
     }
 
     while ($true) {
-        Show-Banner
-        Write-SectionHeader "Network Toolkit"
+        Show-SubHeader "Network Toolkit"
         Write-Host "  [1] Subnet / CIDR calculator"
         Write-Host "  [2] DNS lookup"
         Write-Host "  [3] Latency / traceroute"
@@ -356,8 +362,7 @@ function Invoke-HealthSnapshot {
 #  MODULE: CERTIFICATE CHECKER
 # ============================================================
 function Invoke-RemoteCertCheck {
-    Show-Banner
-    Write-SectionHeader "Remote Certificate Check"
+    Show-SubHeader "Remote Certificate Check"
 
     $target = Read-Host " Enter hostname (and optional :port, default 443)"
     if ([string]::IsNullOrWhiteSpace($target)) {
@@ -431,8 +436,7 @@ function Invoke-RemoteCertCheck {
 }
 
 function Invoke-LocalCertCheck {
-    Show-Banner
-    Write-SectionHeader "Local Certificate Store"
+    Show-SubHeader "Local Certificate Store"
 
     $warnDays = 30
 
@@ -476,8 +480,7 @@ function Invoke-CertChecker {
     }
 
     while ($true) {
-        Show-Banner
-        Write-SectionHeader "Certificate Checker"
+        Show-SubHeader "Certificate Checker"
         Write-Host "  [1] Remote certificate check (hostname:port)"
         Write-Host "  [2] Local certificate store (LocalMachine / CurrentUser \My)"
         Write-Host "  [B] Back to main menu"
