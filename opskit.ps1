@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     opskit - IT diagnostics toolkit for the terminal (PowerShell 5.1-safe)
@@ -11,8 +12,9 @@
 # ============================================================
 #  CONFIG
 # ============================================================
-$Script:Version = "0.1.0"
-$Script:Accent  = "Green"     # 16-color safe. No ANSI/hex in 5.1 conhost.
+$Script:Version      = "0.1.0"
+$Script:Accent       = "Green"  # 16-color safe. No ANSI/hex in 5.1 conhost.
+$Script:CertWarnDays = 30       # certs expiring within this many days get a warning
 
 # ============================================================
 #  UI HELPERS
@@ -373,13 +375,13 @@ function Invoke-RemoteCertCheck {
 
     $hostName, $portText = $target -split ':', 2
     $port = 443
-    if ($portText -and -not [int]::TryParse($portText, [ref]$port)) {
-        Write-Host " Invalid port." -ForegroundColor Red
+    if ($portText -and (-not [int]::TryParse($portText, [ref]$port) -or $port -lt 1 -or $port -gt 65535)) {
+        Write-Host " Invalid port. Expected a number between 1 and 65535." -ForegroundColor Red
         Wait-ForKey
         return
     }
 
-    $warnDays = 30
+    $warnDays = $Script:CertWarnDays
     $tcpClient = $null
     $sslStream = $null
     $script:CertPolicyErrors = [System.Net.Security.SslPolicyErrors]::None
@@ -400,7 +402,18 @@ function Invoke-RemoteCertCheck {
         }
 
         $sslStream = New-Object System.Net.Security.SslStream($tcpClient.GetStream(), $false, $validationCallback)
-        $sslStream.AuthenticateAsClient($hostName)
+
+        # Explicitly offer TLS 1.0-1.3 rather than relying on OS defaults: older
+        # .NET Framework builds may not offer 1.2+ by default, and modern servers
+        # refuse anything less. Tls13 only exists in the enum on .NET 4.8+, so
+        # add it conditionally to stay 5.1-safe.
+        $protocols = [System.Security.Authentication.SslProtocols]::Tls -bor
+                     [System.Security.Authentication.SslProtocols]::Tls11 -bor
+                     [System.Security.Authentication.SslProtocols]::Tls12
+        if ([enum]::GetNames([System.Security.Authentication.SslProtocols]) -contains 'Tls13') {
+            $protocols = $protocols -bor [System.Security.Authentication.SslProtocols]::Tls13
+        }
+        $sslStream.AuthenticateAsClient($hostName, $null, $protocols, $false)
 
         $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($sslStream.RemoteCertificate)
         $daysLeft = ($cert.NotAfter - (Get-Date)).Days
@@ -438,7 +451,7 @@ function Invoke-RemoteCertCheck {
 function Invoke-LocalCertCheck {
     Show-SubHeader "Local Certificate Store"
 
-    $warnDays = 30
+    $warnDays = $Script:CertWarnDays
 
     try {
         $certs = Get-ChildItem -Path Cert:\LocalMachine\My, Cert:\CurrentUser\My -ErrorAction Stop |
@@ -567,6 +580,11 @@ $Dispatch = @{
     "H" = { Invoke-Help }
 }
 
+# If stdin is exhausted (piped/redirected input), Read-Host returns "" forever;
+# without a guard the menu loop would spin endlessly. Bail after a run of
+# consecutive invalid inputs - no human mashes a wrong key this many times.
+$invalidStreak = 0
+
 while ($true) {
     Show-Menu
     $choice = (Read-Host " Select an option").Trim().ToUpper()
@@ -577,9 +595,15 @@ while ($true) {
         break
     }
     elseif ($Dispatch.ContainsKey($choice)) {
+        $invalidStreak = 0
         & $Dispatch[$choice]
     }
     else {
+        $invalidStreak++
+        if ($invalidStreak -ge 10) {
+            Write-Host " Too many invalid inputs in a row - exiting." -ForegroundColor Red
+            break
+        }
         Write-Host " Invalid option." -ForegroundColor Red
         Start-Sleep -Milliseconds 800
     }

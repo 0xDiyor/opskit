@@ -29,10 +29,12 @@ The `-ExecutionPolicy Bypass` flag is needed because PowerShell 5.1 blocks unsig
 | Module | Status | What it does |
 |---|---|---|
 | Ports in use | Working | Maps listening ports to owning processes (port, address, PID, process name) |
-| Network toolkit | Planned | Subnet/CIDR math, DNS record lookups, latency and trace diagnostics |
-| System health snapshot | Planned | CPU, RAM, disk, uptime, and top processes in one exportable view |
-| Certificate checker | Planned | Remote and local cert expiry checks with warning thresholds |
+| Network toolkit | Working | Subnet/CIDR math, DNS record lookups, latency and traceroute diagnostics |
+| System health snapshot | Working | CPU, RAM, disk, uptime, and top processes, with optional text export for ticket notes |
+| Certificate checker | Working | Remote cert inspection (expiry, chain status) and local store expiry scan with warning thresholds |
 | Script runner | Planned | Runs vetted scripts from the local `scripts/` folder only |
+
+There is also an in-app help screen (`H` from the main menu) covering navigation and each module's expected input.
 
 ## Security design
 
@@ -52,10 +54,11 @@ If you run this tool in a managed environment, get approval from whoever owns th
 
 ## Roadmap
 
-- v0.1: menu shell plus working ports module
-- v0.2: health snapshot and DNS lookups
-- v0.3: cert checker and folder scoped script runner
-- v0.4: hash verified script manifest, ticket note export
+- [x] v0.1: menu shell plus working ports module
+- [x] v0.2: health snapshot and network toolkit (subnet calc, DNS, traceroute)
+- [x] v0.3: cert checker (remote and local store)
+- [ ] v0.4: folder scoped script runner with hash verified manifest
+- [ ] v0.5: non-interactive mode (run a module straight from the command line)
 
 ## Contributing
 
