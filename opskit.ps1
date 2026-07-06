@@ -499,6 +499,48 @@ function Invoke-CertChecker {
 }
 
 # ============================================================
+#  HELP
+# ============================================================
+function Invoke-Help {
+    Show-Banner
+    Write-SectionHeader "Help"
+
+    Write-Host " Navigation" -ForegroundColor $Script:Accent
+    Write-Host "   Type a menu number and press Enter to run that module."
+    Write-Host "   Type Q from the main menu to quit; B from a sub-menu to go back."
+    Write-Host "   Any key returns you to the menu once a module finishes."
+    Write-Host ""
+
+    Write-Host " Modules" -ForegroundColor $Script:Accent
+    Write-Host ""
+    Write-Host "  [1] Network toolkit"
+    Write-Host "        Subnet / CIDR calculator - input: IP/CIDR, e.g. 192.168.1.10/24"
+    Write-Host "        DNS lookup               - input: hostname or IP, e.g. github.com"
+    Write-Host "        Latency / traceroute     - input: hostname or IP, e.g. 8.8.8.8"
+    Write-Host ""
+    Write-Host "  [2] Ports in use"
+    Write-Host "        No input needed. Lists listening TCP ports with their owning process."
+    Write-Host "        Some ports only resolve from an elevated (Run as Administrator) prompt."
+    Write-Host ""
+    Write-Host "  [3] System health snapshot"
+    Write-Host "        No input needed. Shows OS, CPU, memory, disk, and top processes."
+    Write-Host "        Offers to export the results as a text file for ticket notes."
+    Write-Host ""
+    Write-Host "  [4] Certificate checker"
+    Write-Host "        Remote check - input: hostname, or hostname:port (default port 443)"
+    Write-Host "        Local check  - no input. Scans Cert:\LocalMachine\My and CurrentUser\My."
+    Write-Host ""
+
+    Write-Host " Requirements" -ForegroundColor $Script:Accent
+    Write-Host "   Windows PowerShell 5.1+ (or PowerShell 7+). No modules to install."
+    Write-Host "   Run via: powershell -ExecutionPolicy Bypass -File .\opskit.ps1"
+    Write-Host ""
+    Write-Host " opskit v$($Script:Version) - https://github.com/0xDiyor/opskit" -ForegroundColor DarkGray
+
+    Wait-ForKey
+}
+
+# ============================================================
 #  MENU (dispatch table pattern - add a line here per new module)
 # ============================================================
 function Show-Menu {
@@ -507,6 +549,7 @@ function Show-Menu {
     Write-Host "  [2] Ports in use"
     Write-Host "  [3] System health snapshot"
     Write-Host "  [4] Certificate checker"
+    Write-Host "  [H] Help"
     Write-Host "  [Q] Quit"
     Write-Host ""
 }
@@ -518,6 +561,7 @@ $Dispatch = @{
     "2" = { Invoke-PortsInUse }
     "3" = { Invoke-HealthSnapshot }
     "4" = { Invoke-CertChecker }
+    "H" = { Invoke-Help }
 }
 
 while ($true) {
